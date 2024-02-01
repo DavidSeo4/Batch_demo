@@ -1,11 +1,10 @@
-package com.basic.batch.Batch_demo.config;
+package com.basic.batch.Batch_demo.batch;
 
-import com.basic.batch.Batch_demo.StudentProcessor;
 import com.basic.batch.Batch_demo.dao.StudentDao;
 import com.basic.batch.Batch_demo.model.Student;
-import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
@@ -15,27 +14,35 @@ import org.springframework.batch.item.file.LineMapper;
 import org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper;
 import org.springframework.batch.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.web.client.RestTemplate;
 
 @Configuration
-@RequiredArgsConstructor
 public class BatchConfig {
 
-    @Autowired
     private final StudentDao studentDao;
-
     private final JobRepository jobRepository;
     private final PlatformTransactionManager platformTransactionManager;
+
+
+    public BatchConfig(StudentDao studentDao, JobRepository jobRepository, PlatformTransactionManager platformTransactionManager) {
+        this.studentDao = studentDao;
+        this.jobRepository = jobRepository;
+        this.platformTransactionManager = platformTransactionManager;
+    }
 
     @Bean
     public StudentProcessor processor(){
         return new StudentProcessor();
+    }
+
+    @Bean RestAPIStudentProcessor restAPIStudentProcessor(){return new RestAPIStudentProcessor();
     }
 
     public RepositoryItemWriter<Student> repositoryItemWriter(){
@@ -55,6 +62,12 @@ public class BatchConfig {
         return itemReaderStudent;
     }
 
+    @Bean
+    @StepScope
+    public RestAPIStudentReader restAPIStudentReader(){
+        return new RestAPIStudentReader("http://localhost:8080/students/get_all", new RestTemplate());
+    }
+
     private LineMapper<Student> lineMapperStudent() {
         DefaultLineMapper<Student> lineMapper = new DefaultLineMapper<>();
 
@@ -72,7 +85,7 @@ public class BatchConfig {
     }
 
     @Bean
-    public Step importStep(){
+    public Step importCSVstep(){
         return new StepBuilder("csvImport", jobRepository)
                 .<Student, Student>chunk(100, platformTransactionManager)
                 .reader(itemReader())
@@ -83,9 +96,27 @@ public class BatchConfig {
     }
 
     @Bean
-    public Job runJob(){
-        return new JobBuilder("importStudents", jobRepository)
-                .start(importStep())
+    public Step RESTtoSQLstep(){
+        return new StepBuilder("csvImport", jobRepository)
+                .<Student, Student>chunk(100, platformTransactionManager)
+                .reader(restAPIStudentReader())
+                .processor(restAPIStudentProcessor())
+                .writer(repositoryItemWriter())
+                .build();
+    }
+
+    @Bean
+    @Primary
+    public Job runCSVjob(){
+        return new JobBuilder("importStudentsFromCSV", jobRepository)
+                .start(importCSVstep())
+                .build();
+    }
+
+    @Bean
+    public Job restToSqlJob(){
+        return new JobBuilder("importStudentsFromRestToSQL", jobRepository)
+                .start(RESTtoSQLstep())
                 .build();
     }
 
